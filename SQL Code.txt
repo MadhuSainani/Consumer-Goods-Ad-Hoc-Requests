@@ -1,0 +1,252 @@
+## Task 1: Provide the list of markets in which customer "Atliq Exclusive" operates its business in the APAC region.
+
+select customer, market, region
+from dim_customer
+where customer = "Atliq Exclusive" and region = "APAC"; 
+
+## Task 2: Provide a report with all the unique product counts for each segment and sort them in descending order of product counts. The final output contains 2 fields: segment and product_count
+
+select segment, 
+count(distinct product_code) as product_count
+from dim_product
+group by segment
+order by product_count desc;
+
+## Task 3: What is the percentage of unique product increase in 2021 vs. 2020? The final output contains these fields, unique_products_2020, unique_products_2021, percentage_chg.
+
+with cte1 as
+	(select count(distinct product_code) as unique_products_2020
+	from dim_product
+	join fact_sales_monthly s
+	using(product_code)
+	where fiscal_year = 2020),
+
+cte2 as
+	(select count(distinct product_code) as unique_products_2021
+	from dim_product
+	join fact_sales_monthly s
+	using(product_code)
+	where fiscal_year = 2021)
+select cte1.unique_products_2020, cte2.unique_products_2021, 
+CONCAT(ROUND((cte2.unique_products_2021 - cte1.unique_products_2020)*100/(cte1.unique_products_2020),2), '%') as percentage_chg
+from cte1, cte2;
+
+Task 4: Follow-up: Which segment had the most increase in unique products in 2021 vs 2020? The final output contains these fields,segment, product_count_2020, product_count_2021,difference.
+
+with cte1 as
+	(select pro.segment, count(distinct pro.product_code) as unique_products_2020
+	from dim_product pro
+	join fact_sales_monthly s
+	using(product_code)
+	where s.fiscal_year = 2020
+    group by pro.segment),
+
+cte2 as
+	(select pro.segment, count(distinct pro.product_code) as unique_products_2021
+	from dim_product pro
+	join fact_sales_monthly s
+	using(product_code)
+	where s.fiscal_year = 2021
+    group by segment)
+select cte1.segment, cte1.unique_products_2020, cte2.unique_products_2021, 
+CONCAT(ROUND((cte2.unique_products_2021 - cte1.unique_products_2020)*100/(cte1.unique_products_2020),2), '%') as percentage_chg
+from cte1
+join cte2 
+on cte1.segment = cte2.segment
+order by percentage_chg desc;
+
+Task 5: Get the products that have the highest and lowest manufacturing costs.The final output should contain these fields, product_code, product, manufacturing_cost
+
+with cte_max as 
+(select p.product_code, p.product,
+mf.manufacturing_cost
+from dim_product p
+join fact_manufacturing_cost mf
+using(product_code)
+where mf.manufacturing_cost = (select MAX(manufacturing_cost) from fact_manufacturing_cost)),
+
+cte_min as 
+(select p.product_code, p.product,
+mf.manufacturing_cost
+from dim_product p
+join fact_manufacturing_cost mf
+using(product_code)
+where mf.manufacturing_cost = (select MIN(manufacturing_cost) from fact_manufacturing_cost))
+
+SELECT * FROM cte_max
+UNION ALL
+SELECT * FROM cte_min;
+
+Task 6: Generate a report which contains the top 5 customers who received an average high pre_invoice_discount_pct for the fiscal year 2021 and in the Indian market. The final output contains these fields: customer_code, customer, average_discount_percentage.
+
+select c.customer_code, c.customer,
+pre.pre_invoice_discount_pct
+from dim_customer c
+join fact_pre_invoice_deductions pre
+using(customer_code)
+where pre.pre_invoice_discount_pct > 
+(select avg(pre_invoice_discount_pct) from fact_pre_invoice_deductions) and
+c.market = "India" and pre.fiscal_year = 2021
+order by pre.pre_invoice_discount_pct desc
+limit 5;
+
+Task 7: Get the complete report of the Gross sales amount for the customer “Atliq Exclusive” for each month. This analysis helps to get an idea of low and high-performing months and take strategic decisions.The final report contains these columns: Month, Year, Gross sales Amount.
+
+select  DATE_FORMAT(s.date, '%M-%Y') as Month,
+s.fiscal_year, 
+CONCAT(ROUND(SUM((s.sold_quantity*g.gross_price)/1000000),2), ' ', 'M') as Total_Gross_Sales_Amount
+from fact_sales_monthly s
+join fact_gross_price g
+using(product_code, fiscal_year)
+join dim_customer c
+using(customer_code)
+where c.customer = "Atliq Exclusive" 
+group by s.date, s.fiscal_year 
+order by s.fiscal_year;
+
+Task 8: In which quarter of 2020, got the maximum total_sold_quantity? The final output contains these fields sorted by the total_sold_quantity,Quarter, total_sold_quantity.
+
+with cte1 as
+(select month(calendar_date) as month, calendar_date
+from dim_date)
+
+select 
+CASE 
+    WHEN month IN (9,10,11) THEN 'Q1'
+    WHEN month IN (12,1,2) THEN 'Q2'
+    WHEN month IN (3,4,5) THEN 'Q3'
+    WHEN month IN (6,7,8) THEN 'Q4'
+    ELSE 'Invalid Month'
+END AS quarter,
+CONCAT(ROUND(SUM(s.sold_quantity)/1000000,2), ' ', 'M') as total_sold_quantity
+from cte1 
+join fact_sales_monthly s
+on cte1.calendar_date = s.date
+where s.fiscal_year = 2020
+group by quarter
+order by total_sold_quantity desc;
+
+Task 9: Which channel helped to bring more gross sales in the fiscal year 2021 and the percentage of contribution? The final output contains these fields:  channel, gross_sales_mln, percentage.
+
+with cte1 as
+(select c.channel, ROUND(SUM(Total_gross_price)/1000000,2) as gross_sales_mln
+from gdb0041.`net sales` ns
+join dim_customer c
+using(customer_code, market)
+where ns.fiscal_year = 2021
+group by c.channel)
+
+select channel, CONCAT(gross_sales_mln, ' ', 'M') as Gross_Sales,
+CONCAT(ROUND((gross_sales_mln/(SUM(gross_sales_mln) OVER()) * 100),2), '%') as percentage_contribution
+from cte1
+order by gross_sales_mln desc;
+
+Task 10: Get the Top 3 products in each division that have a high total_sold_quantity in the fiscal_year 2021? 
+The final output contains these fields, division, product_code, product, total_sold_quantity, rank_order.
+
+WITH cte1 AS
+(SELECT 
+	p.division, p.product_code, p.product, 
+	SUM(sold_quantity) AS total_sold_quantity
+	FROM fact_sales_monthly s 
+    JOIN dim_product p
+    ON p.product_code = s.product_code
+WHERE fiscal_year = 2021
+GROUP BY p.product, p.division, p.product_code),
+
+cte2 AS (SELECT
+*, DENSE_RANK() OVER(partition by division order by total_sold_quantity desc) as drnk
+FROM cte1)
+
+SELECT * FROM cte2 WHERE drnk <= 4;
+
+################################################################ Stored Procedures ####################################################################################
+
+Task 1: Top N products by net sales in million.
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `top_n_products_by_net_sales_mln`(
+in_market VARCHAR(45),
+in_fiscal_year INT,
+in_top_n INT)
+BEGIN
+	SELECT product,
+	ROUND(SUM(Net_Sales)/1000000,2) as net_sales_mln 
+	FROM gdb0041.`net sales` 
+	WHERE fiscal_year = in_fiscal_year AND market = in_market
+	GROUP BY product
+	ORDER BY net_sales_mln desc
+	LIMIT in_top_n;
+END
+
+Task 2: Top N markets by net sales in million. The fields should include: market and net sales in million.
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `top_n_markets_by_net_sales_mln`(
+in_fiscal_year INT,
+in_top_n INT)
+BEGIN
+	SELECT market,
+	ROUND(SUM(Net_Sales)/1000000,2) as net_sales_mln 
+	FROM gdb0041.`net sales`
+	WHERE fiscal_year = in_fiscal_year
+	GROUP BY market
+	ORDER BY net_sales_mln desc
+	LIMIT in_top_n;
+END
+
+Task 3: Top N markets per region by gross sales. The field should include: market, region, gross sales in million, and rank.
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `top_n_market_per_region_by_gross_sales`(
+in_fiscal_year INT,
+in_top_n INT)
+BEGIN
+WITH cte1 AS 
+(SELECT 
+	c.market, c.region,
+	ROUND((SUM(Total_gross_price)/1000000),2) AS gross_sales_mln
+	FROM sales_preinv_discount pre
+    JOIN dim_customer c
+    ON c.customer_code = pre.customer_code AND c.market = pre.market
+WHERE fiscal_year = in_fiscal_year
+GROUP BY c.market, c.region),
+
+cte2 AS (SELECT
+*, DENSE_RANK() OVER(partition by region order by gross_sales_mln desc) as drnk
+FROM cte1)
+
+SELECT * FROM cte2 WHERE drnk <= in_top_n;
+END
+
+Task 4: Top N customers by net sales in million. The field should include: customer and net sales in million.
+
+CREATE DEFINER=`root`@`localhost` PROCEDURE `top_n_customer_by_net_sales_mln`(
+in_fiscal_year INT,
+in_market VARCHAR(45),
+in_top_n INT)
+BEGIN
+	SELECT c.customer,
+	ROUND(SUM(Net_Sales)/1000000,2) as net_sales_mln 
+	FROM gdb0041.`net sales` ns
+	JOIN dim_customer c
+	ON ns.customer_code = c.customer_code AND ns.market = c.market
+	WHERE ns.fiscal_year = in_fiscal_year AND ns.market = in_market
+	GROUP BY c.customer
+	ORDER BY net_sales_mln desc
+	LIMIT in_top_n;
+END
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
