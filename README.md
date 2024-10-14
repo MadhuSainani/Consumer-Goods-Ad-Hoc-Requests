@@ -8,4 +8,5 @@ The project involved analyzing AtliQ Harware's sales, customer, and product data
 - Top selling products
 - Gross sales
 - Customer discount analysis
+  
 This project also includes writing stored procedures for reusable reports for AtliQ Hardware such as Top N products by Net Sales, Top N markets by Net Sales, Top N markets per region by Gross Sales, Top N customers by Net Sales.
